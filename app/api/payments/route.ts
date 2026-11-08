@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
     await processPayment(orderId, paymentMethod, sessionUser.id_pengguna);
     const destination = new URL("/dashboard/kasir", request.url);
     destination.searchParams.set("message", `Pembayaran berhasil untuk ${orderId}.`);
+    destination.searchParams.set("orderId", orderId);
     return NextResponse.redirect(destination);
   } catch (error) {
     const destination = new URL("/dashboard/kasir", request.url);

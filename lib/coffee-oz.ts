@@ -249,6 +249,98 @@ export async function getPaymentContext() {
   };
 }
 
+export async function getCashierOrders() {
+  const orders = await prisma.pesanan.findMany({
+    where: {
+      status_pesanan: {
+        not: "Batal",
+      },
+    },
+    orderBy: {
+      tanggal: "desc",
+    },
+    include: {
+      pelanggan: true,
+      detail_pesanan: {
+        include: {
+          menu: true,
+        },
+      },
+      pembayaran: true,
+    },
+  });
+
+  const unpaid: any[] = [];
+  const paid: any[] = [];
+
+  for (const order of orders) {
+    const hasPaid = (order.pembayaran ?? []).some((payment: any) => payment.status_pembayaran === "Lunas");
+    const normalizedOrder = {
+      ...order,
+      total: Number(order.total_tagihan ?? 0),
+      items: (order.detail_pesanan ?? []).map((detail: any) => ({
+        ...detail,
+        subtotalValue: Number(detail.subtotal ?? 0),
+      })),
+      pembayaran: order.pembayaran ?? [],
+      payment: (order.pembayaran ?? [])[0] ?? null,
+    };
+
+    if (hasPaid) {
+      paid.push(normalizedOrder);
+    } else {
+      unpaid.push(normalizedOrder);
+    }
+  }
+
+  return { unpaid, paid };
+}
+
+export async function getOrderDetail(orderId: string) {
+  if (!orderId) {
+    return null;
+  }
+
+  return prisma.pesanan.findUnique({
+    where: { id_pesanan: orderId },
+    include: {
+      pelanggan: true,
+      detail_pesanan: {
+        include: {
+          menu: true,
+        },
+      },
+      pembayaran: true,
+    },
+  });
+}
+
+export async function getTransactionRecord(transactionId: string) {
+  if (!transactionId) {
+    return null;
+  }
+
+  return prisma.transaksi.findUnique({
+    where: { id_transaksi: transactionId },
+    include: {
+      pembayaran: {
+        include: {
+          pesanan: {
+            include: {
+              pelanggan: true,
+              detail_pesanan: {
+                include: {
+                  menu: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 export async function getSalesReport(from?: string, to?: string) {
   const startDate = from ? new Date(`${from}T00:00:00`) : new Date("2026-01-01T00:00:00");
   const endDate = to ? new Date(`${to}T23:59:59`) : new Date("2026-12-31T23:59:59");
@@ -281,14 +373,18 @@ export async function getSalesReport(from?: string, to?: string) {
     },
   });
 
-  const totalRevenue = transactions.reduce(
+  const validTransactions = (transactions as any[]).filter(
+    (transaction: any) => !["Dibatalkan", "Gagal"].includes(transaction.pembayaran?.status_pembayaran ?? ""),
+  );
+
+  const totalRevenue = validTransactions.reduce(
     (sum: number, item: any) => sum + Number(item.total_transaksi ?? 0),
     0,
   );
-  const averageTicket = transactions.length > 0 ? totalRevenue / transactions.length : 0;
+  const averageTicket = validTransactions.length > 0 ? totalRevenue / validTransactions.length : 0;
 
   const productSales = new Map<string, number>();
-  for (const transaction of transactions) {
+  for (const transaction of validTransactions) {
     const order = transaction.pembayaran?.pesanan;
     for (const detail of order?.detail_pesanan ?? []) {
       const productName = detail.menu?.nama_menu ?? "Menu lain";
@@ -297,9 +393,9 @@ export async function getSalesReport(from?: string, to?: string) {
   }
 
   return {
-    transactions,
+    transactions: validTransactions,
     totalRevenue,
-    totalTransactions: transactions.length,
+    totalTransactions: validTransactions.length,
     averageTicket,
     productSales: Array.from(productSales.entries()).map(([name, qty]) => ({ name, qty })),
   };
@@ -320,7 +416,8 @@ export async function processPayment(orderId: string, paymentMethod: string, act
     throw new Error("Pesanan tidak ditemukan.");
   }
 
-  if (order.pembayaran.some((payment: any) => payment.status_pembayaran === "Lunas")) {
+  const existingPaidPayment = order.pembayaran.find((payment: any) => payment.status_pembayaran === "Lunas");
+  if (existingPaidPayment) {
     throw new Error("Pembayaran untuk pesanan ini sudah selesai.");
   }
 
@@ -385,6 +482,155 @@ export async function processPayment(orderId: string, paymentMethod: string, act
   });
 
   return result;
+}
+
+export async function updateOwnerTransaction(transactionId: string, totalTransaksi: number, paymentMethod: string) {
+  const record: any = await prisma.transaksi.findUnique({
+    where: { id_transaksi: transactionId },
+    include: {
+      pembayaran: {
+        include: {
+          pesanan: true,
+        },
+      },
+    },
+  });
+
+  if (!record?.pembayaran) {
+    throw new Error("Transaksi tidak ditemukan.");
+  }
+
+  const normalizedTotal = Number(totalTransaksi || 0);
+  const paymentId = record.id_pembayaran ?? record.pembayaran.id_pembayaran;
+  const orderId = record.pembayaran.id_pesanan ?? record.pembayaran.pesanan?.id_pesanan;
+
+  await prisma.$transaction(async (tx: any) => {
+    await tx.transaksi.update({
+      where: { id_transaksi: transactionId },
+      data: {
+        total_transaksi: normalizedTotal,
+      },
+    });
+
+    await tx.pembayaran.update({
+      where: { id_pembayaran: paymentId },
+      data: {
+        metode: paymentMethod,
+        jumlah_bayar: normalizedTotal,
+        status_pembayaran: "Lunas",
+      },
+    });
+
+    if (orderId) {
+      await tx.pesanan.update({
+        where: { id_pesanan: orderId },
+        data: {
+          total_tagihan: normalizedTotal,
+          status_pesanan: "Selesai",
+        },
+      });
+    }
+  });
+
+  return true;
+}
+
+export async function deleteOwnerTransaction(transactionId: string) {
+  const record: any = await prisma.transaksi.findUnique({
+    where: { id_transaksi: transactionId },
+    include: {
+      pembayaran: {
+        include: {
+          pesanan: true,
+        },
+      },
+    },
+  });
+
+  if (!record?.pembayaran) {
+    throw new Error("Transaksi tidak ditemukan.");
+  }
+
+  const paymentId = record.id_pembayaran ?? record.pembayaran.id_pembayaran;
+  const orderId = record.pembayaran.id_pesanan ?? record.pembayaran.pesanan?.id_pesanan;
+
+  await prisma.$transaction(async (tx: any) => {
+    await tx.pembayaran.update({
+      where: { id_pembayaran: paymentId },
+      data: {
+        status_pembayaran: "Dibatalkan",
+      },
+    });
+
+    if (orderId) {
+      await tx.pesanan.update({
+        where: { id_pesanan: orderId },
+        data: {
+          status_pesanan: "Batal",
+        },
+      });
+    }
+  });
+
+  return true;
+}
+
+export async function deleteOwnerOrderDetail(detailId: string) {
+  const detail = await prisma.detail_pesanan.findUnique({
+    where: { id_detail: detailId },
+    include: {
+      pesanan: true,
+    },
+  });
+
+  if (!detail) {
+    throw new Error("Detail pesanan tidak ditemukan.");
+  }
+
+  const remainingDetails = await prisma.detail_pesanan.findMany({
+    where: { id_pesanan: detail.id_pesanan ?? undefined },
+    include: { menu: true },
+  });
+
+  const nextDetails = remainingDetails.filter((item: any) => item.id_detail !== detailId);
+  const nextTotal = nextDetails.reduce((sum: number, item: any) => sum + Number(item.subtotal ?? 0), 0);
+
+  await prisma.$transaction(async (tx: any) => {
+    await tx.detail_pesanan.delete({
+      where: { id_detail: detailId },
+    });
+
+    if (detail.id_pesanan) {
+      await tx.pesanan.update({
+        where: { id_pesanan: detail.id_pesanan },
+        data: {
+          total_tagihan: nextTotal,
+        },
+      });
+
+      const relatedPayment = await tx.pembayaran.findFirst({
+        where: { id_pesanan: detail.id_pesanan },
+      });
+
+      if (relatedPayment) {
+        await tx.pembayaran.update({
+          where: { id_pembayaran: relatedPayment.id_pembayaran },
+          data: {
+            jumlah_bayar: nextTotal,
+          },
+        });
+
+        await tx.transaksi.updateMany({
+          where: { id_pembayaran: relatedPayment.id_pembayaran },
+          data: {
+            total_transaksi: nextTotal,
+          },
+        });
+      }
+    }
+  });
+
+  return true;
 }
 
 export function getRoleRedirectUrl(role: string) {
