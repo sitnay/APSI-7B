@@ -34,3 +34,17 @@ select,
 textarea {
   font: inherit;
 }
+
+@media print {
+  body {
+    background: white !important;
+  }
+
+  nav,
+  form,
+  button,
+  a,
+  .print\:hidden {
+    display: none !important;
+  }
+}

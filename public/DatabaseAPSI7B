@@ -1,0 +1,251 @@
+-- =====================================
+-- DATABASE APSI 7B
+-- SISTEM INFORMASI PELAYANAN KOPI OZ
+-- =====================================
+
+-- Role       Username    Password
+-- Pemilik    rhadya      pemilik123
+-- Kasir      rahma       kasir123
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+DROP TABLE IF EXISTS
+    laporan_penjualan,
+    transaksi,
+    pembayaran,
+    detail_pesanan,
+    pesanan,
+    penggunaan_stok,
+    komposisi_menu,
+    pengguna,
+    pelanggan,
+    menu,
+    bahan_baku
+CASCADE;
+
+-- 1. TABEL BAHAN_BAKU
+
+CREATE TABLE bahan_baku (
+    id_bahan VARCHAR(10) PRIMARY KEY,
+    nama_bahan VARCHAR(100),
+    stok_saat_ini DECIMAL(10,2),
+    stok_minimum DECIMAL(10,2),
+    satuan VARCHAR(20)
+);
+
+INSERT INTO bahan_baku
+(id_bahan, nama_bahan, stok_saat_ini, stok_minimum, satuan)
+VALUES
+('BB01', 'Biji Espresso House Blend', 2500, 1000, 'gram'),
+('BB02', 'Biji Kopi Espresso', 800, 500, 'gram'),
+('BB03', 'Susu Full Cream', 20000, 5000, 'ml'),
+('BB04', 'Sirup Gula Aren', 3000, 1000, 'ml'),
+('BB06', 'Bubuk Pure Matcha Uji', 450, 500, 'gram'),
+('BB07', 'Dough Butter Croissant', 40, 20, 'pcs');
+
+-- 2. TABEL MENU
+
+CREATE TABLE menu (
+    id_menu VARCHAR(10) PRIMARY KEY,
+    nama_menu VARCHAR(100),
+    harga DECIMAL(10,2),
+    status_tersedia INTEGER
+);
+
+INSERT INTO menu
+(id_menu, nama_menu, harga, status_tersedia)
+VALUES
+('MN01', 'Kopi Susu Aren', 22000, 1),
+('MN04', 'Americano', 28000, 1),
+('MN03', 'Butter Croissant', 25000, 1),
+('MN06', 'Matcha Latte', 26000, 1);
+
+-- 3. TABEL PELANGGAN
+
+CREATE TABLE pelanggan (
+    id_pelanggan VARCHAR(10) PRIMARY KEY,
+    nama_pelanggan VARCHAR(100),
+    alamat_pelanggan VARCHAR(255),
+    no_hp_pelanggan VARCHAR(15)
+);
+
+INSERT INTO pelanggan
+(id_pelanggan, nama_pelanggan, alamat_pelanggan, no_hp_pelanggan)
+VALUES
+('PL001', 'Andi', 'Jl. Melati No. 5', '081234560001'),
+('PL002', 'Budi', 'Jl. Kenanga No. 12', '081234560002'),
+('PL003', 'Citra', 'Jl. Mawar No. 8', '081234560003'),
+('PL004', 'Langit', 'Jl. Anggrek No. 21', '081234560004'),
+('PL005', 'Sinta', 'Jl. Dahlia No. 3', '081234560005');
+
+-- 4. TABEL PENGGUNA
+
+CREATE TABLE pengguna (
+    id_pengguna VARCHAR(10) PRIMARY KEY,
+    nama VARCHAR(100),
+    username VARCHAR(50),
+    password VARCHAR(255),
+    role VARCHAR(20)
+);
+
+INSERT INTO pengguna
+(id_pengguna, nama, username, password, role)
+VALUES
+('USR02', 'Rahma', 'rahma', 'hash_password_usr02', 'kasir');
+
+-- 5. TABEL KOMPOSISI_MENU
+
+CREATE TABLE komposisi_menu (
+    id_komposisi VARCHAR(10) PRIMARY KEY,
+    jumlah_bahan DECIMAL(10,2),
+    id_menu VARCHAR(10),
+    id_bahan VARCHAR(10),
+    FOREIGN KEY (id_menu) REFERENCES menu(id_menu),
+    FOREIGN KEY (id_bahan) REFERENCES bahan_baku(id_bahan)
+);
+
+INSERT INTO komposisi_menu
+(id_komposisi, jumlah_bahan, id_menu, id_bahan)
+VALUES
+('KM001', 18, 'MN01', 'BB01'),
+('KM002', 150, 'MN01', 'BB03'),
+('KM003', 20, 'MN01', 'BB04'),
+('KM004', 1, 'MN03', 'BB07'),
+('KM005', 15, 'MN04', 'BB02'),
+('KM006', 15, 'MN06', 'BB06'),
+('KM007', 150, 'MN06', 'BB03');
+
+-- 6. TABEL PENGGUNAAN_STOK
+
+CREATE TABLE penggunaan_stok (
+    id_penggunaan VARCHAR(10) PRIMARY KEY,
+    tanggal DATE,
+    jumlah_dipakai DECIMAL(10,2),
+    id_bahan VARCHAR(10),
+    id_pengguna VARCHAR(10),
+    FOREIGN KEY (id_bahan) REFERENCES bahan_baku(id_bahan),
+    FOREIGN KEY (id_pengguna) REFERENCES pengguna(id_pengguna)
+);
+
+INSERT INTO penggunaan_stok
+(id_penggunaan, tanggal, jumlah_dipakai, id_bahan, id_pengguna)
+VALUES
+('PG001', '2026-10-17', 36, 'BB01', 'USR02'),
+('PG002', '2026-10-17', 300, 'BB03', 'USR02'),
+('PG003', '2026-10-17', 2, 'BB07', 'USR02');
+
+-- 7. TABEL PESANAN
+
+CREATE TABLE pesanan (
+    id_pesanan VARCHAR(10) PRIMARY KEY,
+    tanggal DATE,
+    nomor_antrian INTEGER,
+    status_pesanan VARCHAR(20),
+    total_tagihan DECIMAL(10,2),
+    id_pengguna VARCHAR(10),
+    id_pelanggan VARCHAR(10),
+    FOREIGN KEY (id_pengguna) REFERENCES pengguna(id_pengguna),
+    FOREIGN KEY (id_pelanggan) REFERENCES pelanggan(id_pelanggan)
+);
+
+INSERT INTO pesanan
+(id_pesanan, tanggal, nomor_antrian, status_pesanan,
+ total_tagihan, id_pengguna, id_pelanggan)
+VALUES
+('PS001', '2026-10-17', 1, 'Selesai', 69000, 'USR02', 'PL001'),
+('PS002', '2026-10-17', 2, 'Diproses', 88000, 'USR02', 'PL002'),
+('PS003', '2026-10-17', 3, 'Batal', 72000, 'USR02', 'PL003'),
+('PS004', '2026-10-17', 4, 'Menunggu', 47000, 'USR02', 'PL004'),
+('PS005', '2026-10-17', 5, 'Diproses', 50000, 'USR02', 'PL005');
+
+-- 8. TABEL DETAIL_PESANAN
+
+CREATE TABLE detail_pesanan (
+    id_detail VARCHAR(10) PRIMARY KEY,
+    kuantitas_produk INTEGER,
+    subtotal DECIMAL(10,2),
+    id_pesanan VARCHAR(10),
+    id_menu VARCHAR(10),
+    FOREIGN KEY (id_pesanan) REFERENCES pesanan(id_pesanan),
+    FOREIGN KEY (id_menu) REFERENCES menu(id_menu)
+);
+
+INSERT INTO detail_pesanan
+(id_detail, kuantitas_produk, subtotal, id_pesanan, id_menu)
+VALUES
+('DT001', 2, 44000, 'PS001', 'MN01'),
+('DT002', 1, 25000, 'PS001', 'MN03'),
+('DT003', 1, 28000, 'PS002', 'MN04'),
+('DT004', 2, 52000, 'PS003', 'MN06'),
+('DT005', 2, 44000, 'PS004', 'MN01'),
+('DT006', 1, 25000, 'PS004', 'MN03'),
+('DT007', 2, 50000, 'PS005', 'MN03');
+
+-- 9. TABEL PEMBAYARAN
+
+CREATE TABLE pembayaran (
+    id_pembayaran VARCHAR(10) PRIMARY KEY,
+    id_pesanan VARCHAR(10),
+    metode VARCHAR(20),
+    jumlah_bayar DECIMAL(10,2),
+    status_pembayaran VARCHAR(20),
+    id_pengguna VARCHAR(10),
+    FOREIGN KEY (id_pesanan) REFERENCES pesanan(id_pesanan),
+    FOREIGN KEY (id_pengguna) REFERENCES pengguna(id_pengguna)
+);
+
+INSERT INTO pembayaran
+(id_pembayaran, id_pesanan, metode, jumlah_bayar,
+ status_pembayaran, id_pengguna)
+VALUES
+('PM001', 'PS001', 'QRIS', 69000, 'Lunas', 'USR02'),
+('PM002', 'PS002', 'Tunai', 88000, 'Lunas', 'USR02'),
+('PM003', 'PS003', 'Debit Mandiri', 72000, 'Belum Lunas', 'USR02'),
+('PM004', 'PS004', 'QRIS', 47000, 'Lunas', 'USR02'),
+('PM005', 'PS005', 'Tunai', 50000, 'Lunas', 'USR02');
+
+-- 10. TABEL TRANSAKSI
+
+CREATE TABLE transaksi (
+    id_transaksi VARCHAR(10) PRIMARY KEY,
+    tanggal_transaksi DATE,
+    total_transaksi DECIMAL(10,2),
+    id_pembayaran VARCHAR(10),
+    FOREIGN KEY (id_pembayaran) REFERENCES pembayaran(id_pembayaran)
+);
+
+INSERT INTO transaksi
+(id_transaksi, tanggal_transaksi, total_transaksi, id_pembayaran)
+VALUES
+('TR001', '2026-10-17', 69000, 'PM001'),
+('TR002', '2026-10-17', 88000, 'PM002'),
+('TR003', '2026-10-17', 72000, 'PM003'),
+('TR004', '2026-10-17', 47000, 'PM004'),
+('TR005', '2026-10-17', 50000, 'PM005');
+
+-- 11. TABEL LAPORAN_PENJUALAN
+
+CREATE TABLE laporan_penjualan (
+    id_laporan VARCHAR(10) PRIMARY KEY,
+    periode VARCHAR(30),
+    total_penjualan DECIMAL(12,2),
+    id_pengguna VARCHAR(10),
+    FOREIGN KEY (id_pengguna) REFERENCES pengguna(id_pengguna)
+);
+
+INSERT INTO laporan_penjualan
+(id_laporan, periode, total_penjualan, id_pengguna)
+VALUES
+('LP001', 'Oktober 2026', 254000, 'USR02');
+
+SELECT * FROM bahan_baku;
+SELECT * FROM menu;
+SELECT * FROM pelanggan;
+SELECT * FROM pengguna;
+SELECT * FROM komposisi_menu;
+SELECT * FROM penggunaan_stok;
+SELECT * FROM pesanan;
+SELECT * FROM detail_pesanan;
+SELECT * FROM pembayaran;
+SELECT * FROM transaksi;
+SELECT * FROM laporan_penjualan;
