@@ -112,10 +112,6 @@ export function getRoleLandingPage(role: string) {
       return "/dashboard/owner";
     case "Kasir":
       return "/dashboard/kasir";
-    case "Barista":
-      return "/dashboard/barista";
-    case "Supervisor Stok":
-      return "/dashboard/supervisor";
     default:
       return "/";
   }
@@ -136,20 +132,6 @@ export async function ensureSeedUsers() {
       username: "rahma",
       password: hashPassword("kasir123"),
       role: "Kasir",
-    },
-    {
-      id_pengguna: "USR03",
-      nama: "Dina",
-      username: "barista",
-      password: hashPassword("barista123"),
-      role: "Barista",
-    },
-    {
-      id_pengguna: "USR04",
-      nama: "Farhan",
-      username: "supervisor",
-      password: hashPassword("stok123"),
-      role: "Supervisor Stok",
     },
   ];
 
@@ -175,9 +157,13 @@ export async function ensureSeedUsers() {
   }
 }
 
-export async function loginUser(username: string, password: string) {
+export async function loginUser(username: string, password: string, expectedRole?: string) {
   const normalizedUsername = username.trim();
   if (!normalizedUsername || !password.trim()) {
+    return null;
+  }
+
+  if (expectedRole && !["Pemilik", "Kasir"].includes(expectedRole)) {
     return null;
   }
 
@@ -189,6 +175,14 @@ export async function loginUser(username: string, password: string) {
         equals: normalizedUsername,
         mode: "insensitive",
       },
+      ...(expectedRole
+        ? {
+            role: {
+              equals: expectedRole,
+              mode: "insensitive",
+            },
+          }
+        : {}),
     },
   });
 
