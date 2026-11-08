@@ -1,6 +1,12 @@
 import { redirect } from "next/navigation";
 
-import { formatCurrency, getSalesReport, getSessionUser, getTransactionRecord } from "@/lib/coffee-oz";
+import {
+  formatCurrency,
+  getDefaultSalesDateRange,
+  getSalesReport,
+  getSessionUser,
+  getTransactionRecord,
+} from "@/lib/coffee-oz";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +26,10 @@ export default async function OwnerDashboardPage({
   }
 
   const params = (await searchParams) ?? {};
-  const report: any = await getSalesReport(params.from, params.to);
+  const defaultRange = getDefaultSalesDateRange();
+  const fromDate = params.from ?? defaultRange.from;
+  const toDate = params.to ?? defaultRange.to;
+  const report: any = await getSalesReport(fromDate, toDate);
   const selectedTransaction: any = params.selectedTransactionId
     ? await getTransactionRecord(params.selectedTransactionId)
     : (report.transactions?.[0] ?? null);
@@ -40,7 +49,7 @@ export default async function OwnerDashboardPage({
               <input
                 type="date"
                 name="from"
-                defaultValue={params.from ?? "2026-10-01"}
+                defaultValue={fromDate}
                 className="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-white placeholder:text-white/60"
               />
             </label>
@@ -49,7 +58,7 @@ export default async function OwnerDashboardPage({
               <input
                 type="date"
                 name="to"
-                defaultValue={params.to ?? "2026-10-31"}
+                defaultValue={toDate}
                 className="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-white placeholder:text-white/60"
               />
             </label>
@@ -104,7 +113,7 @@ export default async function OwnerDashboardPage({
                   {report.transactions.map((transaction: any) => (
                     <tr key={transaction.id_transaksi} className="border-t border-white/10 text-white/90">
                       <td className="py-3 pr-4 font-semibold">
-                        <a href={`?from=${params.from ?? ""}&to=${params.to ?? ""}&selectedTransactionId=${transaction.id_transaksi}`} className="underline decoration-white/50 underline-offset-4">
+                        <a href={`?from=${fromDate}&to=${toDate}&selectedTransactionId=${transaction.id_transaksi}`} className="underline decoration-white/50 underline-offset-4">
                           {transaction.id_transaksi}
                         </a>
                       </td>
@@ -215,7 +224,7 @@ export default async function OwnerDashboardPage({
                   <select name="paymentMethod" defaultValue={selectedTransaction.pembayaran?.metode ?? "QRIS"} className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white">
                     <option value="QRIS" className="text-slate-900">QRIS</option>
                     <option value="Transfer Bank" className="text-slate-900">Transfer Bank</option>
-                    <option value="Tunai" className="text-slate-900">Tunai</option>
+                    <option value="Tunai di Kasir" className="text-slate-900">Tunai di Kasir</option>
                     <option value="Kartu Debit" className="text-slate-900">Kartu Debit</option>
                   </select>
                 </label>

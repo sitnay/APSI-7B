@@ -60,26 +60,35 @@ export default async function KasirDashboardPage({
                 </div>
               ) : (
                 unpaid.map((order: any) => (
-                  <a
+                  <div
                     key={order.id_pesanan}
-                    href={`?orderId=${order.id_pesanan}`}
-                    className={`block rounded-2xl border p-4 transition ${
+                    className={`rounded-2xl border p-4 transition ${
                       selectedOrder?.id_pesanan === order.id_pesanan
                         ? "border-white/60 bg-white/18"
                         : "border-white/10 bg-white/6"
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold">{order.id_pesanan}</span>
-                      <span className="rounded-full border border-amber-200/50 bg-amber-100/20 px-2 py-1 text-[0.6rem] uppercase tracking-[0.12em] text-amber-50">
-                        {order.status_pesanan}
-                      </span>
+                    <a href={`?orderId=${order.id_pesanan}`} className="block">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-semibold">{order.id_pesanan}</span>
+                        <span className="rounded-full border border-amber-200/50 bg-amber-100/20 px-2 py-1 text-[0.6rem] uppercase tracking-[0.12em] text-amber-50">
+                          {order.status_pesanan}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-white/75">
+                        {new Date(order.tanggal ?? Date.now()).toLocaleString("id-ID")}
+                      </p>
+                      <p className="mt-2 text-lg font-bold text-white">{formatCurrency(order.total ?? 0)}</p>
+                    </a>
+                    <div className="mt-4 flex items-center justify-end">
+                      <a
+                        href={`/dashboard/kasir/detail?orderId=${order.id_pesanan}`}
+                        className="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/90 transition hover:bg-white/15"
+                      >
+                        Rincian Pesanan
+                      </a>
                     </div>
-                    <p className="mt-2 text-sm text-white/75">
-                      {new Date(order.tanggal ?? Date.now()).toLocaleString("id-ID")}
-                    </p>
-                    <p className="mt-2 text-lg font-bold text-white">{formatCurrency(order.total ?? 0)}</p>
-                  </a>
+                  </div>
                 ))
               )}
             </div>
@@ -99,26 +108,35 @@ export default async function KasirDashboardPage({
                 </div>
               ) : (
                 paid.map((order: any) => (
-                  <a
+                  <div
                     key={order.id_pesanan}
-                    href={`?orderId=${order.id_pesanan}`}
-                    className={`block rounded-2xl border p-4 transition ${
+                    className={`rounded-2xl border p-4 transition ${
                       selectedOrder?.id_pesanan === order.id_pesanan
                         ? "border-emerald-200/60 bg-emerald-100/10"
                         : "border-white/10 bg-white/6"
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold">{order.id_pesanan}</span>
-                      <span className="rounded-full border border-emerald-200/50 bg-emerald-100/15 px-2 py-1 text-[0.6rem] uppercase tracking-[0.12em] text-emerald-50">
-                        Lunas
-                      </span>
+                    <a href={`?orderId=${order.id_pesanan}`} className="block">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-semibold">{order.id_pesanan}</span>
+                        <span className="rounded-full border border-emerald-200/50 bg-emerald-100/15 px-2 py-1 text-[0.6rem] uppercase tracking-[0.12em] text-emerald-50">
+                          Lunas
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-white/75">
+                        {new Date(order.tanggal ?? Date.now()).toLocaleString("id-ID")}
+                      </p>
+                      <p className="mt-2 text-lg font-bold text-white">{formatCurrency(order.total ?? 0)}</p>
+                    </a>
+                    <div className="mt-4 flex items-center justify-end">
+                      <a
+                        href={`/dashboard/kasir/receipt?orderId=${order.id_pesanan}`}
+                        className="rounded-xl border border-emerald-200/40 bg-emerald-100/10 px-3 py-2 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-emerald-50 transition hover:bg-emerald-100/15"
+                      >
+                        Lihat Bukti
+                      </a>
                     </div>
-                    <p className="mt-2 text-sm text-white/75">
-                      {new Date(order.tanggal ?? Date.now()).toLocaleString("id-ID")}
-                    </p>
-                    <p className="mt-2 text-lg font-bold text-white">{formatCurrency(order.total ?? 0)}</p>
-                  </a>
+                  </div>
                 ))
               )}
             </div>
@@ -197,16 +215,23 @@ export default async function KasirDashboardPage({
                       <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-white/20 bg-white/6 px-4 py-3 text-left text-sm text-white/90">
                         <div>
                           <p className="font-semibold">Transfer Bank</p>
-                          <span className="text-xs text-white/70">BCA / BRI / Mandiri</span>
+                          <span className="text-xs text-white/70">Rekening resmi toko</span>
                         </div>
                         <input type="radio" name="paymentMethod" value="Transfer Bank" className="h-4 w-4 accent-[#1b2349]" />
                       </label>
                       <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-white/20 bg-white/6 px-4 py-3 text-left text-sm text-white/90">
                         <div>
-                          <p className="font-semibold">Tunai</p>
+                          <p className="font-semibold">Kartu Debit</p>
+                          <span className="text-xs text-white/70">EDC / kartu debit</span>
+                        </div>
+                        <input type="radio" name="paymentMethod" value="Kartu Debit" className="h-4 w-4 accent-[#1b2349]" />
+                      </label>
+                      <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-white/20 bg-white/6 px-4 py-3 text-left text-sm text-white/90">
+                        <div>
+                          <p className="font-semibold">Tunai di Kasir</p>
                           <span className="text-xs text-white/70">Bayar langsung</span>
                         </div>
-                        <input type="radio" name="paymentMethod" value="Tunai" className="h-4 w-4 accent-[#1b2349]" />
+                        <input type="radio" name="paymentMethod" value="Tunai di Kasir" className="h-4 w-4 accent-[#1b2349]" />
                       </label>
                     </div>
 

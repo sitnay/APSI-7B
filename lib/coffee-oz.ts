@@ -203,6 +203,24 @@ export async function loginUser(username: string, password: string, expectedRole
   } satisfies SessionUser;
 }
 
+export function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function getDefaultSalesDateRange() {
+  const today = new Date();
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  return {
+    from: formatDateInputValue(startOfMonth),
+    to: formatDateInputValue(endOfMonth),
+  };
+}
+
 export function formatCurrency(value: any) {
   const numericValue = typeof value === "number" ? value : Number.parseFloat(String(value ?? "0"));
   return new Intl.NumberFormat("id-ID", {
@@ -342,8 +360,9 @@ export async function getTransactionRecord(transactionId: string) {
 }
 
 export async function getSalesReport(from?: string, to?: string) {
-  const startDate = from ? new Date(`${from}T00:00:00`) : new Date("2026-01-01T00:00:00");
-  const endDate = to ? new Date(`${to}T23:59:59`) : new Date("2026-12-31T23:59:59");
+  const defaultRange = getDefaultSalesDateRange();
+  const startDate = from ? new Date(`${from}T00:00:00`) : new Date(`${defaultRange.from}T00:00:00`);
+  const endDate = to ? new Date(`${to}T23:59:59`) : new Date(`${defaultRange.to}T23:59:59`);
 
   const transactions = await prisma.transaksi.findMany({
     where: {
@@ -401,7 +420,31 @@ export async function getSalesReport(from?: string, to?: string) {
   };
 }
 
+export const PAYMENT_METHODS = [
+  "QRIS",
+  "Transfer Bank",
+  "Kartu Debit",
+  "Tunai di Kasir",
+] as const;
+
+export function normalizePaymentMethod(value: string) {
+  const trimmedValue = String(value ?? "").trim();
+  const normalized = PAYMENT_METHODS.find((method) => method.toLowerCase() === trimmedValue.toLowerCase());
+
+  if (normalized) {
+    return normalized;
+  }
+
+  if (trimmedValue.toLowerCase() === "tunai") {
+    return "Tunai di Kasir";
+  }
+
+  throw new Error("Metode pembayaran yang dipilih tidak didukung.");
+}
+
 export async function processPayment(orderId: string, paymentMethod: string, actorId: string) {
+  const normalizedMethod = normalizePaymentMethod(paymentMethod);
+
   const order = await prisma.pesanan.findUnique({
     where: { id_pesanan: orderId },
     include: {
@@ -416,9 +459,18 @@ export async function processPayment(orderId: string, paymentMethod: string, act
     throw new Error("Pesanan tidak ditemukan.");
   }
 
+  if (order.status_pesanan === "Batal") {
+    throw new Error("Pesanan sudah dibatalkan dan tidak dapat dibayar.");
+  }
+
   const existingPaidPayment = order.pembayaran.find((payment: any) => payment.status_pembayaran === "Lunas");
   if (existingPaidPayment) {
     throw new Error("Pembayaran untuk pesanan ini sudah selesai.");
+  }
+
+  const freshTotal = Number(order.total_tagihan ?? 0);
+  if (!Number.isFinite(freshTotal) || freshTotal <= 0) {
+    throw new Error("Total tagihan pesanan tidak valid.");
   }
 
   const paymentId =
@@ -434,12 +486,30 @@ export async function processPayment(orderId: string, paymentMethod: string, act
   );
 
   const result = await prisma.$transaction(async (tx: any) => {
+    const latestOrder = await tx.pesanan.findUnique({
+      where: { id_pesanan: orderId },
+      include: { pembayaran: true },
+    });
+
+    if (!latestOrder) {
+      throw new Error("Pesanan tidak ditemukan saat memproses pembayaran.");
+    }
+
+    const duplicatePayment = latestOrder.pembayaran?.find((payment: any) => payment.status_pembayaran === "Lunas");
+    if (duplicatePayment) {
+      throw new Error("Pembayaran untuk pesanan ini sudah selesai.");
+    }
+
+    if (latestOrder.status_pesanan === "Batal") {
+      throw new Error("Pesanan sudah dibatalkan dan tidak dapat dibayar.");
+    }
+
     if (order.pembayaran[0]) {
       await tx.pembayaran.update({
         where: { id_pembayaran: order.pembayaran[0].id_pembayaran },
         data: {
-          metode: paymentMethod,
-          jumlah_bayar: order.total_tagihan,
+          metode: normalizedMethod,
+          jumlah_bayar: freshTotal,
           status_pembayaran: "Lunas",
           id_pengguna: actorId,
         },
@@ -449,8 +519,8 @@ export async function processPayment(orderId: string, paymentMethod: string, act
         data: {
           id_pembayaran: paymentId,
           id_pesanan: orderId,
-          metode: paymentMethod,
-          jumlah_bayar: order.total_tagihan,
+          metode: normalizedMethod,
+          jumlah_bayar: freshTotal,
           status_pembayaran: "Lunas",
           id_pengguna: actorId,
         },
@@ -461,7 +531,7 @@ export async function processPayment(orderId: string, paymentMethod: string, act
       data: {
         id_transaksi: transactionId,
         tanggal_transaksi: new Date(),
-        total_transaksi: order.total_tagihan,
+        total_transaksi: freshTotal,
         id_pembayaran: paymentId,
       },
     });
@@ -470,14 +540,16 @@ export async function processPayment(orderId: string, paymentMethod: string, act
       where: { id_pesanan: orderId },
       data: {
         status_pesanan: "Selesai",
+        total_tagihan: freshTotal,
       },
     });
 
     return {
       paymentId,
       transactionId,
-      total: Number(order.total_tagihan ?? 0),
+      total: freshTotal,
       orderId,
+      paymentMethod: normalizedMethod,
     };
   });
 

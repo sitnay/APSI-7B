@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getSessionUser, processPayment } from "@/lib/coffee-oz";
+import { getSessionUser, normalizePaymentMethod, processPayment } from "@/lib/coffee-oz";
 
 export async function POST(request: NextRequest) {
   const sessionUser = await getSessionUser();
@@ -19,9 +19,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await processPayment(orderId, paymentMethod, sessionUser.id_pengguna);
+    const normalizedMethod = normalizePaymentMethod(paymentMethod);
+    await processPayment(orderId, normalizedMethod, sessionUser.id_pengguna);
     const destination = new URL("/dashboard/kasir", request.url);
-    destination.searchParams.set("message", `Pembayaran berhasil untuk ${orderId}.`);
+    destination.searchParams.set("message", "Pembayaran berhasil dilaksanakan.");
     destination.searchParams.set("orderId", orderId);
     return NextResponse.redirect(destination);
   } catch (error) {
