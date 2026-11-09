@@ -12,9 +12,7 @@ model transaksi {
   id_transaksi      String      @id @db.VarChar(10)
   tanggal_transaksi DateTime?   @db.Date
   total_transaksi   Decimal?    @db.Decimal(10, 2)
-  id_pembayaran   
-  
-    String?     @db.VarChar(10)
+  id_pembayaran     String?     @db.VarChar(10)
   pembayaran        pembayaran? @relation(fields: [id_pembayaran], references: [id_pembayaran], onDelete: NoAction, onUpdate: NoAction)
 }
 
