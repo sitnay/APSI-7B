@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { LoginExperience, type LoginStage, type LoginActor } from "@/components/LoginExperience";
 import { getRoleLandingPage, getSessionUser } from "@/lib/coffee-oz";
+import { createCsrfToken } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +37,11 @@ export default async function Home({
         ? "login"
         : "unavailable"
       : "splash";
+  const csrfToken = createCsrfToken();
 
   return (
     <LoginExperience
+      csrfToken={csrfToken}
       initialActor={selectedActor}
       initialError={params.error ?? ""}
       initialStage={initialStage}

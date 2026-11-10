@@ -1,241 +1,160 @@
 import { redirect } from "next/navigation";
 
-import {
-  formatCurrency,
-  getDefaultSalesDateRange,
-  getSalesReport,
-  getSessionUser,
-  getTransactionRecord,
-} from "@/lib/coffee-oz";
+import { formatCurrency, getDefaultSalesDateRange, getSalesReport, getSessionUser } from "@/lib/coffee-oz";
 
 export const dynamic = "force-dynamic";
 
-export default async function OwnerDashboardPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ from?: string; to?: string; selectedTransactionId?: string; message?: string }>;
-}) {
+function localDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export default async function OwnerDashboardPage() {
   const sessionUser = await getSessionUser();
 
-  if (!sessionUser) {
+  if (!sessionUser || sessionUser.role !== "Pemilik") {
     redirect("/");
   }
 
-  if (sessionUser.role !== "Pemilik") {
-    redirect("/");
-  }
-
-  const params = (await searchParams) ?? {};
   const defaultRange = getDefaultSalesDateRange();
-  const fromDate = params.from ?? defaultRange.from;
-  const toDate = params.to ?? defaultRange.to;
-  const report: any = await getSalesReport(fromDate, toDate);
-  const selectedTransaction: any = params.selectedTransactionId
-    ? await getTransactionRecord(params.selectedTransactionId)
-    : (report.transactions?.[0] ?? null);
+  const report = await getSalesReport(defaultRange.from, defaultRange.to);
+  const todayKey = localDateKey(new Date());
+  const todayRevenue = report.transactions.reduce<number>((total, transaction) => {
+    if (!transaction.tanggal_transaksi) {
+      return total;
+    }
+
+    const transactionDate = new Date(transaction.tanggal_transaksi);
+    return localDateKey(transactionDate) === todayKey
+      ? total + Number(transaction.total_transaksi ?? 0)
+      : total;
+  }, 0);
+
+  const chartDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+    const key = localDateKey(date);
+    const value = report.transactions.reduce<number>((total, transaction) => {
+      return transaction.tanggal_transaksi && localDateKey(new Date(transaction.tanggal_transaksi)) === key
+        ? total + Number(transaction.total_transaksi ?? 0)
+        : total;
+    }, 0);
+
+    return {
+      key,
+      label: new Intl.DateTimeFormat("id-ID", { weekday: "short" }).format(date),
+      value,
+    };
+  });
+  const chartMaximum = Math.max(...chartDays.map((day) => day.value), 1);
+  const topProducts = [...report.productSales]
+    .sort((left, right) => right.qty - left.qty)
+    .slice(0, 4);
+  const productMaximum = Math.max(...topProducts.map((item) => item.qty), 1);
 
   return (
-    <main className="space-y-6">
-      <section className="rounded-[26px] border border-white/20 bg-white/12 p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] backdrop-blur-sm md:p-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <main className="owner-dashboard-page">
+      <header className="owner-page-heading">
+        <div>
+          <h2>Performa Bisnis</h2>
+          <p>Ringkasan performa Kopi OZ untuk {new Intl.DateTimeFormat("id-ID", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          }).format(new Date())}</p>
+        </div>
+        <a className="owner-primary-link" href="/dashboard/owner/reports">
+          Lihat Laporan Lengkap
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6" /></svg>
+        </a>
+      </header>
+
+      <section aria-label="Ringkasan penjualan" className="owner-kpi-grid">
+        <article className="owner-kpi-card">
+          <span aria-hidden="true" className="owner-kpi-icon"><svg viewBox="0 0 24 24"><path d="M4 19V9m5 10V5m5 14v-7m5 7V8M2 19h20" /></svg></span>
           <div>
-            <p className="text-[0.72rem] uppercase tracking-[0.2em] text-white/65">Laporan penjualan</p>
-            <h2 className="mt-2 text-3xl font-bold tracking-[-0.07em]">Ringkasan penjualan</h2>
+            <p>Penjualan Hari Ini</p>
+            <strong>{formatCurrency(todayRevenue)}</strong>
           </div>
-
-          <form method="GET" className="flex flex-wrap items-center gap-3">
-            <label className="text-sm text-white/80">
-              <span className="mr-2">Dari</span>
-              <input
-                type="date"
-                name="from"
-                defaultValue={fromDate}
-                className="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-white placeholder:text-white/60"
-              />
-            </label>
-            <label className="text-sm text-white/80">
-              <span className="mr-2">Sampai</span>
-              <input
-                type="date"
-                name="to"
-                defaultValue={toDate}
-                className="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-white placeholder:text-white/60"
-              />
-            </label>
-            <button type="submit" className="rounded-xl bg-[#eff4ff] px-4 py-2 text-sm font-bold text-[#1c2f6d]">
-              Filter
-            </button>
-          </form>
-        </div>
+          <span aria-hidden="true" className="owner-kpi-chevron"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
+        </article>
+        <article className="owner-kpi-card">
+          <span aria-hidden="true" className="owner-kpi-icon"><svg viewBox="0 0 24 24"><path d="M7 3h10v18l-5-3-5 3V3Z" /><path d="M10 8h4m-4 4h4" /></svg></span>
+          <div>
+            <p>Total Pesanan</p>
+            <strong>{report.totalTransactions}</strong>
+          </div>
+          <span aria-hidden="true" className="owner-kpi-chevron"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
+        </article>
+        <article className="owner-kpi-card">
+          <span aria-hidden="true" className="owner-kpi-icon"><svg viewBox="0 0 24 24"><rect height="14" rx="2" width="19" x="2.5" y="5" /><path d="M3 10h18M7 15h3" /></svg></span>
+          <div>
+            <p>Rata-rata Penjualan</p>
+            <strong>{formatCurrency(report.averageTicket)}</strong>
+          </div>
+          <span aria-hidden="true" className="owner-kpi-chevron"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
+        </article>
       </section>
 
-      {params.message && (
-        <div className="rounded-2xl border border-amber-200/50 bg-amber-100/90 px-4 py-3 text-sm font-medium text-amber-900">
-          {params.message}
-        </div>
-      )}
-
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-[22px] border border-white/15 bg-white/12 p-5 text-white backdrop-blur-sm">
-          <p className="text-xs uppercase tracking-[0.18em] text-white/70">Total pendapatan</p>
-          <h3 className="mt-3 text-3xl font-black tracking-[-0.05em]">{formatCurrency(report.totalRevenue)}</h3>
-        </div>
-        <div className="rounded-[22px] border border-white/15 bg-white/12 p-5 text-white backdrop-blur-sm">
-          <p className="text-xs uppercase tracking-[0.18em] text-white/70">Jumlah transaksi</p>
-          <h3 className="mt-3 text-3xl font-black tracking-[-0.05em]">{report.totalTransactions}</h3>
-        </div>
-        <div className="rounded-[22px] border border-white/15 bg-white/12 p-5 text-white backdrop-blur-sm">
-          <p className="text-xs uppercase tracking-[0.18em] text-white/70">Rata-rata transaksi</p>
-          <h3 className="mt-3 text-3xl font-black tracking-[-0.05em]">{formatCurrency(report.averageTicket)}</h3>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-[26px] border border-white/15 bg-white/12 p-5 text-white backdrop-blur-sm md:p-6">
-          <h3 className="text-xl font-bold">Riwayat transaksi</h3>
-
-          {report.transactions.length === 0 ? (
-            <div className="mt-5 rounded-2xl border border-dashed border-white/40 bg-white/6 p-6 text-center text-white/80">
-              Belum terdapat transaksi pada periode yang dipilih.
+      <div className="owner-analytics-grid">
+        <section aria-labelledby="owner-trend-title" className="owner-panel">
+          <div className="owner-panel__heading">
+            <div>
+              <h3 id="owner-trend-title">Tren Penjualan</h3>
+              <p>Penjualan 7 hari terakhir</p>
             </div>
+            <span className="owner-chart-period">7 hari terakhir⌄</span>
+          </div>
+          <div aria-label="Grafik penjualan 7 hari terakhir" className="owner-chart" role="img">
+            <div aria-hidden="true" className="owner-chart__axis">
+              <span>{formatCurrency(chartMaximum)}</span>
+              <span>{formatCurrency(chartMaximum * 0.66)}</span>
+              <span>{formatCurrency(chartMaximum * 0.33)}</span>
+              <span>Rp 0</span>
+            </div>
+            <div className="owner-chart__plot">
+              {chartDays.map((day, index) => (
+                <div className="owner-chart__column" key={day.key}>
+                  <span
+                    className={`owner-chart__bar${index === chartDays.length - 1 ? " owner-chart__bar--today" : ""}`}
+                    style={{ height: `${Math.max((day.value / chartMaximum) * 100, 1)}%` }}
+                    title={formatCurrency(day.value)}
+                  />
+                  <span className="owner-chart__label">{day.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="owner-products-title" className="owner-panel">
+          <div className="owner-panel__heading">
+            <div>
+              <h3 id="owner-products-title">Menu Terlaris</h3>
+              <p>Berdasarkan jumlah terjual</p>
+            </div>
+          </div>
+          {topProducts.length === 0 ? (
+            <p className="owner-empty-state">Belum ada data menu terjual.</p>
           ) : (
-            <div className="mt-5 overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-white/70">
-                  <tr>
-                    <th className="pb-3 pr-4">No. Transaksi</th>
-                    <th className="pb-3 pr-4">Tanggal</th>
-                    <th className="pb-3 pr-4">Metode</th>
-                    <th className="pb-3 pr-4 text-right">Nilai</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.transactions.map((transaction: any) => (
-                    <tr key={transaction.id_transaksi} className="border-t border-white/10 text-white/90">
-                      <td className="py-3 pr-4 font-semibold">
-                        <a href={`?from=${fromDate}&to=${toDate}&selectedTransactionId=${transaction.id_transaksi}`} className="underline decoration-white/50 underline-offset-4">
-                          {transaction.id_transaksi}
-                        </a>
-                      </td>
-                      <td className="py-3 pr-4">{new Date(transaction.tanggal_transaksi ?? Date.now()).toLocaleDateString("id-ID")}</td>
-                      <td className="py-3 pr-4">{transaction.pembayaran?.metode ?? "-"}</td>
-                      <td className="py-3 pr-4 text-right font-semibold">{formatCurrency(transaction.total_transaksi ?? 0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-[26px] border border-white/15 bg-white/12 p-5 text-white backdrop-blur-sm md:p-6">
-          <h3 className="text-xl font-bold">Menu terlaris</h3>
-          {report.productSales.length === 0 ? (
-            <div className="mt-5 rounded-2xl border border-dashed border-white/40 bg-white/6 p-6 text-center text-white/80">
-              Belum ada data menu terjual.
-            </div>
-          ) : (
-            <div className="mt-5 space-y-3">
-              {report.productSales.map((item: any) => (
-                <div key={item.name} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/6 px-3 py-3">
-                  <span className="font-medium text-white/90">{item.name}</span>
-                  <span className="rounded-full bg-white/15 px-2 py-1 text-xs uppercase tracking-[0.12em] text-white/80">
-                    {item.qty} pcs
+            <div className="owner-product-list">
+              {topProducts.map((item, index) => (
+                <div className="owner-product" key={item.name}>
+                  <span className="owner-product__rank">{index + 1}</span>
+                  <span className="owner-product__name">{item.name}</span>
+                  <span className="owner-product__qty">{item.qty} terjual</span>
+                  <span aria-hidden="true" className="owner-product__bar">
+                    <span style={{ width: `${(item.qty / productMaximum) * 100}%` }} />
                   </span>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      </section>
-
-      {selectedTransaction && (
-        <section className="rounded-[26px] border border-white/15 bg-white/12 p-5 text-white backdrop-blur-sm md:p-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-[0.72rem] uppercase tracking-[0.2em] text-white/65">Detail transaksi</p>
-              <h3 className="mt-2 text-2xl font-bold tracking-[-0.06em]">{selectedTransaction.id_transaksi}</h3>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <form action="/api/owner/transactions" method="POST">
-                <input type="hidden" name="action" value="delete" />
-                <input type="hidden" name="transactionId" value={selectedTransaction.id_transaksi} />
-                <button type="submit" className="rounded-xl border border-red-200/40 bg-red-500/15 px-4 py-2 text-sm font-bold text-red-100">
-                  Hapus Transaksi
-                </button>
-              </form>
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-white/60">Informasi</p>
-                <div className="mt-3 space-y-2 text-sm text-white/85">
-                  <div className="flex items-center justify-between"><span>Pesanan</span><strong>{selectedTransaction.pembayaran?.pesanan?.id_pesanan ?? "-"}</strong></div>
-                  <div className="flex items-center justify-between"><span>Tanggal</span><strong>{new Date(selectedTransaction.tanggal_transaksi ?? Date.now()).toLocaleDateString("id-ID")}</strong></div>
-                  <div className="flex items-center justify-between"><span>Metode</span><strong>{selectedTransaction.pembayaran?.metode ?? "-"}</strong></div>
-                  <div className="flex items-center justify-between"><span>Status</span><strong>{selectedTransaction.pembayaran?.status_pembayaran ?? "Lunas"}</strong></div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-white/60">Detail menu</p>
-                <div className="mt-3 space-y-3">
-                  {(selectedTransaction.pembayaran?.pesanan?.detail_pesanan ?? []).map((detail: any) => (
-                    <div key={detail.id_detail} className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                      <div>
-                        <p className="font-semibold text-white">{detail.menu?.nama_menu ?? "Menu"}</p>
-                        <p className="text-xs text-white/70">Qty {detail.kuantitas_produk}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-semibold text-white">{formatCurrency(detail.subtotal ?? 0)}</span>
-                        <form action="/api/owner/transactions" method="POST">
-                          <input type="hidden" name="action" value="delete-detail" />
-                          <input type="hidden" name="detailId" value={detail.id_detail} />
-                          <button type="submit" className="rounded-lg border border-white/25 bg-white/8 px-2 py-1 text-[0.62rem] uppercase tracking-[0.12em] text-white/80">
-                            Hapus
-                          </button>
-                        </form>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-white/60">Edit transaksi</p>
-              <form action="/api/owner/transactions" method="POST" className="mt-4 space-y-4">
-                <input type="hidden" name="action" value="update" />
-                <input type="hidden" name="transactionId" value={selectedTransaction.id_transaksi} />
-                <label className="block text-sm text-white/80">
-                  <span className="mb-2 block">Total transaksi</span>
-                  <input
-                    type="number"
-                    name="totalTransaksi"
-                    defaultValue={Number(selectedTransaction.total_transaksi ?? selectedTransaction.pembayaran?.jumlah_bayar ?? 0)}
-                    className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white"
-                    required
-                  />
-                </label>
-                <label className="block text-sm text-white/80">
-                  <span className="mb-2 block">Metode pembayaran</span>
-                  <select name="paymentMethod" defaultValue={selectedTransaction.pembayaran?.metode ?? "QRIS"} className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white">
-                    <option value="QRIS" className="text-slate-900">QRIS</option>
-                    <option value="Transfer Bank" className="text-slate-900">Transfer Bank</option>
-                    <option value="Tunai di Kasir" className="text-slate-900">Tunai di Kasir</option>
-                    <option value="Kartu Debit" className="text-slate-900">Kartu Debit</option>
-                  </select>
-                </label>
-                <button type="submit" className="w-full rounded-xl bg-[#eff4ff] px-4 py-3 text-sm font-bold text-[#1c2f6d]">
-                  Simpan Perubahan
-                </button>
-              </form>
-            </div>
-          </div>
         </section>
-      )}
+      </div>
     </main>
   );
 }

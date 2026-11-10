@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sistem Informasi Pelayanan Kopi OZ
 
-## Getting Started
+Aplikasi internal Kopi OZ menggunakan Next.js, React, Prisma ORM, dan PostgreSQL. Autentikasi yang tersedia saat ini adalah untuk Pemilik dan Kasir. Barista dan Supervisor Stok tetap ditampilkan sebagai pilihan, tetapi belum dapat masuk.
 
-First, run the development server:
+## Persyaratan
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Node.js versi yang didukung Next.js 16
+- Database Kopi OZ yang sudah tersedia di Neon PostgreSQL
+- Nilai `DATABASE_URL` Neon dengan SSL aktif
+- `SESSION_SECRET` acak dengan panjang minimal 32 byte
+
+Jangan membuat database baru untuk menjalankan aplikasi ini. Simpan URL koneksi Neon pada `.env.local` yang tidak dilacak Git, bukan pada `.env`. URL harus memakai host `*.neon.tech`, port PostgreSQL Neon, nama database, username, password, dan `sslmode=require`. Contoh format (gunakan nilai dari proyek Neon yang sudah ada, jangan salin contoh sebagai kredensial):
+
+```env
+DATABASE_URL="postgresql://<username>:<password>@<host-neon>:5432/<database>?sslmode=require"
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Karakter khusus pada username atau password harus di-URL-encode. Buat nilai rahasia sesi, misalnya dengan PowerShell:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Simpan hasilnya sebagai `SESSION_SECRET` di `.env.local` bersama `DATABASE_URL`. Jangan masukkan rahasia tersebut ke repository.
 
-## Learn More
+## Instalasi dan menjalankan
 
-To learn more about Next.js, take a look at the following resources:
+```powershell
+npm install
+npx prisma generate
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Buka [http://localhost:3000](http://localhost:3000).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Database dan migration
 
-## Deploy on Vercel
+Skema Prisma berada di `prisma/schema.prisma`. Migration `20261109170000_require_unique_pengguna_username` menetapkan `pengguna.username` wajib diisi dan unik. Migration ini melakukan pemeriksaan awal dan berhenti dengan pesan yang jelas jika ada username kosong atau duplikat.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Migration belum diterapkan otomatis oleh aplikasi. Setelah memastikan `DATABASE_URL` menunjuk ke database yang benar dan membuat backup, terapkan migration secara eksplisit:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```powershell
+npx prisma migrate deploy
+npx prisma generate
+```
+
+Jangan menjalankan `prisma migrate reset` atau membuat ulang database untuk menyiapkan aplikasi ini.
+
+## Autentikasi
+
+- Login Pemilik dan Kasir memeriksa username, kata sandi, serta role di backend.
+- Kata sandi baru disimpan dengan bcrypt. Hash SHA-256 lama yang valid akan ditingkatkan ke bcrypt ketika login berhasil.
+- Session ditandatangani dengan `SESSION_SECRET` dan disimpan pada cookie `httpOnly`, `sameSite=lax`.
+- Formulir login, logout, pembayaran, dan perubahan transaksi memakai token CSRF yang ditandatangani server.
+- Akun contoh tidak dibuat atau ditimpa otomatis oleh aplikasi.
+
+## Route utama
+
+- `/` — splash screen, pemilihan aktor, dan formulir login.
+- `/dashboard/kasir` — ringkasan Kasir dengan jumlah pesanan belum/sudah lunas.
+- `/dashboard/kasir/pembayaran` — daftar pesanan yang dapat difilter antara belum lunas dan lunas.
+- `/dashboard/kasir/detail` — detail pesanan Kasir.
+- `/dashboard/kasir/receipt` — daftar transaksi lunas dan bukti yang dapat dicetak.
+- `/dashboard/owner` — ringkasan performa penjualan Pemilik.
+- `/dashboard/owner/reports` — filter periode, laporan, detail/edit/hapus transaksi.
+- `/api/login`, `/api/logout` — autentikasi dan pengakhiran sesi.
+- `/api/payments` — pemrosesan pembayaran.
+- `/api/owner/transactions` — perubahan transaksi oleh Pemilik.
+
+Tampilan menggunakan frame Figma Kopi OZ untuk splash, pemilihan aktor, dashboard Pemilik/Kasir, laporan, pembayaran, bukti transaksi, dan konfirmasi logout. Alur Pelanggan, Barista, serta Supervisor Stok tetap tidak tersedia. Semua angka, transaksi, pesanan, dan detail menu diambil dari database yang telah dikonfigurasi.

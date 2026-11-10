@@ -1,8 +1,10 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { compare, hash } from "bcryptjs";
 
 import { prisma } from "@/lib/prisma";
+import { getSessionSecret } from "@/lib/security";
 
 export type SessionUser = {
   id_pengguna: string;
@@ -12,10 +14,9 @@ export type SessionUser = {
 };
 
 const SESSION_COOKIE = "coffee_oz_session";
-const SESSION_SECRET = process.env.SESSION_SECRET ?? "coffee-oz-local-secret";
 
-export function hashPassword(password: string) {
-  return crypto.createHash("sha256").update(password.trim()).digest("hex");
+export async function hashPassword(password: string) {
+  return hash(password.trim(), 12);
 }
 
 function makeId(prefix: string, existingIds: string[]) {
@@ -40,7 +41,7 @@ export function createSessionCookie(user: SessionUser) {
   };
 
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = crypto.createHmac("sha256", SESSION_SECRET).update(encodedPayload).digest("hex");
+  const signature = crypto.createHmac("sha256", getSessionSecret()).update(encodedPayload).digest("hex");
 
   return Buffer.from(JSON.stringify({ payload, sig: signature })).toString("base64url");
 }
@@ -49,6 +50,8 @@ export function verifySessionCookie(rawValue?: string | null) {
   if (!rawValue) {
     return null;
   }
+
+  const secret = getSessionSecret();
 
   try {
     const decoded = JSON.parse(Buffer.from(rawValue, "base64url").toString("utf8")) as {
@@ -61,11 +64,16 @@ export function verifySessionCookie(rawValue?: string | null) {
     }
 
     const expectedSignature = crypto
-      .createHmac("sha256", SESSION_SECRET)
+      .createHmac("sha256", secret)
       .update(Buffer.from(JSON.stringify(decoded.payload)).toString("base64url"))
       .digest("hex");
 
-    if (decoded.sig !== expectedSignature) {
+    const providedSignature = Buffer.from(decoded.sig, "hex");
+    const expectedSignatureBuffer = Buffer.from(expectedSignature, "hex");
+    if (
+      providedSignature.length !== expectedSignatureBuffer.length ||
+      !crypto.timingSafeEqual(providedSignature, expectedSignatureBuffer)
+    ) {
       return null;
     }
 
@@ -117,89 +125,63 @@ export function getRoleLandingPage(role: string) {
   }
 }
 
-export async function ensureSeedUsers() {
-  const requiredUsers = [
-    {
-      id_pengguna: "USR01",
-      nama: "Rhadya",
-      username: "rhadya",
-      password: hashPassword("pemilik123"),
-      role: "Pemilik",
-    },
-    {
-      id_pengguna: "USR02",
-      nama: "Rahma",
-      username: "rahma",
-      password: hashPassword("kasir123"),
-      role: "Kasir",
-    },
-  ];
-
-  for (const candidate of requiredUsers) {
-    const existing = await prisma.pengguna.findUnique({
-      where: { id_pengguna: candidate.id_pengguna },
-    });
-
-    if (existing) {
-      await prisma.pengguna.update({
-        where: { id_pengguna: candidate.id_pengguna },
-        data: {
-          nama: candidate.nama,
-          username: candidate.username,
-          password: candidate.password,
-          role: candidate.role,
-        },
-      });
-      continue;
-    }
-
-    await prisma.pengguna.create({ data: candidate });
-  }
-}
-
-export async function loginUser(username: string, password: string, expectedRole?: string) {
+export async function loginUser(username: string, password: string, expectedRole: string) {
   const normalizedUsername = username.trim();
-  if (!normalizedUsername || !password.trim()) {
+  const normalizedPassword = password.trim();
+  if (!normalizedUsername || !normalizedPassword) {
     return null;
   }
 
-  if (expectedRole && !["Pemilik", "Kasir"].includes(expectedRole)) {
+  if (!["Pemilik", "Kasir"].includes(expectedRole)) {
     return null;
   }
-
-  await ensureSeedUsers();
 
   const user = await prisma.pengguna.findFirst({
     where: {
-      username: {
-        equals: normalizedUsername,
-        mode: "insensitive",
-      },
-      ...(expectedRole
-        ? {
-            role: {
-              equals: expectedRole,
-              mode: "insensitive",
-            },
-          }
-        : {}),
+      username: normalizedUsername,
     },
   });
 
-  if (!user) {
+  if (!user || !user.username || !user.password || !user.role) {
     return null;
   }
 
-  const hashedPassword = hashPassword(password);
-  if (user.password !== hashedPassword) {
+  const role = user.role.toLowerCase() === "pemilik"
+    ? "Pemilik"
+    : user.role.toLowerCase() === "kasir"
+      ? "Kasir"
+      : null;
+
+  if (!role || role !== expectedRole) {
     return null;
+  }
+
+  const isBcryptHash = /^\$2[aby]\$\d{2}\$/.test(user.password);
+  const isLegacyHash = /^[a-f\d]{64}$/i.test(user.password);
+  const passwordMatches = isBcryptHash
+    ? await compare(normalizedPassword, user.password)
+    : isLegacyHash &&
+      crypto.timingSafeEqual(
+        Buffer.from(user.password.toLowerCase(), "hex"),
+        Buffer.from(crypto.createHash("sha256").update(normalizedPassword).digest("hex"), "hex"),
+      );
+
+  if (!passwordMatches) {
+    return null;
+  }
+
+  if (!isBcryptHash) {
+    await prisma.pengguna.update({
+      where: { id_pengguna: user.id_pengguna },
+      data: { password: await hashPassword(normalizedPassword) },
+    });
   }
 
   return {
     id_pengguna: user.id_pengguna,
-    username: user.username ?? normalizedUsername,
-    role: user.role ?? "Kasir",
-    nama: user.nama ?? user.username ?? normalizedUsername,
+    username: user.username,
+    role,
+    nama: user.nama ?? user.username,
   } satisfies SessionUser;
 }
 
@@ -221,7 +203,7 @@ export function getDefaultSalesDateRange() {
   };
 }
 
-export function formatCurrency(value: any) {
+export function formatCurrency(value: unknown) {
   const numericValue = typeof value === "number" ? value : Number.parseFloat(String(value ?? "0"));
   return new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -255,10 +237,7 @@ export async function getPaymentContext() {
     return null;
   }
 
-  const subtotal = order.detail_pesanan.reduce(
-    (total: number, item: any) => total + Number(item.subtotal ?? 0),
-    0,
-  );
+  const subtotal = order.detail_pesanan.reduce((total, item) => total + Number(item.subtotal ?? 0), 0);
 
   return {
     order,
@@ -288,20 +267,20 @@ export async function getCashierOrders() {
     },
   });
 
-  const unpaid: any[] = [];
-  const paid: any[] = [];
+  const unpaid = [];
+  const paid = [];
 
   for (const order of orders) {
-    const hasPaid = (order.pembayaran ?? []).some((payment: any) => payment.status_pembayaran === "Lunas");
+    const hasPaid = order.pembayaran.some((payment) => payment.status_pembayaran === "Lunas");
     const normalizedOrder = {
       ...order,
       total: Number(order.total_tagihan ?? 0),
-      items: (order.detail_pesanan ?? []).map((detail: any) => ({
+      items: order.detail_pesanan.map((detail) => ({
         ...detail,
         subtotalValue: Number(detail.subtotal ?? 0),
       })),
-      pembayaran: order.pembayaran ?? [],
-      payment: (order.pembayaran ?? [])[0] ?? null,
+      pembayaran: order.pembayaran,
+      payment: order.pembayaran[0] ?? null,
     };
 
     if (hasPaid) {
@@ -361,8 +340,12 @@ export async function getTransactionRecord(transactionId: string) {
 
 export async function getSalesReport(from?: string, to?: string) {
   const defaultRange = getDefaultSalesDateRange();
-  const startDate = from ? new Date(`${from}T00:00:00`) : new Date(`${defaultRange.from}T00:00:00`);
-  const endDate = to ? new Date(`${to}T23:59:59`) : new Date(`${defaultRange.to}T23:59:59`);
+  const startDate = from
+    ? new Date(`${from}T00:00:00.000Z`)
+    : new Date(`${defaultRange.from}T00:00:00.000Z`);
+  const endDate = to
+    ? new Date(`${to}T23:59:59.999Z`)
+    : new Date(`${defaultRange.to}T23:59:59.999Z`);
 
   const transactions = await prisma.transaksi.findMany({
     where: {
@@ -392,12 +375,12 @@ export async function getSalesReport(from?: string, to?: string) {
     },
   });
 
-  const validTransactions = (transactions as any[]).filter(
-    (transaction: any) => !["Dibatalkan", "Gagal"].includes(transaction.pembayaran?.status_pembayaran ?? ""),
+  const validTransactions = transactions.filter(
+    (transaction) => !["Dibatalkan", "Gagal"].includes(transaction.pembayaran?.status_pembayaran ?? ""),
   );
 
   const totalRevenue = validTransactions.reduce(
-    (sum: number, item: any) => sum + Number(item.total_transaksi ?? 0),
+    (sum, item) => sum + Number(item.total_transaksi ?? 0),
     0,
   );
   const averageTicket = validTransactions.length > 0 ? totalRevenue / validTransactions.length : 0;
@@ -463,7 +446,7 @@ export async function processPayment(orderId: string, paymentMethod: string, act
     throw new Error("Pesanan sudah dibatalkan dan tidak dapat dibayar.");
   }
 
-  const existingPaidPayment = order.pembayaran.find((payment: any) => payment.status_pembayaran === "Lunas");
+  const existingPaidPayment = order.pembayaran.find((payment) => payment.status_pembayaran === "Lunas");
   if (existingPaidPayment) {
     throw new Error("Pembayaran untuk pesanan ini sudah selesai.");
   }
@@ -477,15 +460,15 @@ export async function processPayment(orderId: string, paymentMethod: string, act
     order.pembayaran[0]?.id_pembayaran ??
     makeId(
       "PM",
-      (await prisma.pembayaran.findMany({ select: { id_pembayaran: true } })).map((row: any) => row.id_pembayaran),
+      (await prisma.pembayaran.findMany({ select: { id_pembayaran: true } })).map((row) => row.id_pembayaran),
     );
 
   const transactionId = makeId(
     "TR",
-    (await prisma.transaksi.findMany({ select: { id_transaksi: true } })).map((row: any) => row.id_transaksi),
+    (await prisma.transaksi.findMany({ select: { id_transaksi: true } })).map((row) => row.id_transaksi),
   );
 
-  const result = await prisma.$transaction(async (tx: any) => {
+  const result = await prisma.$transaction(async (tx) => {
     const latestOrder = await tx.pesanan.findUnique({
       where: { id_pesanan: orderId },
       include: { pembayaran: true },
@@ -495,7 +478,7 @@ export async function processPayment(orderId: string, paymentMethod: string, act
       throw new Error("Pesanan tidak ditemukan saat memproses pembayaran.");
     }
 
-    const duplicatePayment = latestOrder.pembayaran?.find((payment: any) => payment.status_pembayaran === "Lunas");
+    const duplicatePayment = latestOrder.pembayaran?.find((payment) => payment.status_pembayaran === "Lunas");
     if (duplicatePayment) {
       throw new Error("Pembayaran untuk pesanan ini sudah selesai.");
     }
@@ -556,8 +539,33 @@ export async function processPayment(orderId: string, paymentMethod: string, act
   return result;
 }
 
-export async function updateOwnerTransaction(transactionId: string, totalTransaksi: number, paymentMethod: string) {
-  const record: any = await prisma.transaksi.findUnique({
+export async function updateOwnerTransaction(
+  transactionId: string,
+  totalTransaksi: number,
+  transactionDate: string,
+) {
+  const normalizedTotal = Number(totalTransaksi);
+  if (
+    !Number.isSafeInteger(normalizedTotal) ||
+    normalizedTotal < 1 ||
+    normalizedTotal > 99_999_999
+  ) {
+    throw new Error("Jumlah transaksi harus antara Rp1 dan Rp99.999.999.");
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(transactionDate)) {
+    throw new Error("Tanggal transaksi tidak valid.");
+  }
+
+  const normalizedDate = new Date(`${transactionDate}T00:00:00.000Z`);
+  if (
+    Number.isNaN(normalizedDate.getTime()) ||
+    normalizedDate.toISOString().slice(0, 10) !== transactionDate
+  ) {
+    throw new Error("Tanggal transaksi tidak valid.");
+  }
+
+  const record = await prisma.transaksi.findUnique({
     where: { id_transaksi: transactionId },
     include: {
       pembayaran: {
@@ -572,22 +580,25 @@ export async function updateOwnerTransaction(transactionId: string, totalTransak
     throw new Error("Transaksi tidak ditemukan.");
   }
 
-  const normalizedTotal = Number(totalTransaksi || 0);
+  if (["Dibatalkan", "Gagal"].includes(record.pembayaran.status_pembayaran ?? "")) {
+    throw new Error("Transaksi yang dibatalkan atau gagal tidak dapat diubah.");
+  }
+
   const paymentId = record.id_pembayaran ?? record.pembayaran.id_pembayaran;
   const orderId = record.pembayaran.id_pesanan ?? record.pembayaran.pesanan?.id_pesanan;
 
-  await prisma.$transaction(async (tx: any) => {
+  await prisma.$transaction(async (tx) => {
     await tx.transaksi.update({
       where: { id_transaksi: transactionId },
       data: {
         total_transaksi: normalizedTotal,
+        tanggal_transaksi: normalizedDate,
       },
     });
 
     await tx.pembayaran.update({
       where: { id_pembayaran: paymentId },
       data: {
-        metode: paymentMethod,
         jumlah_bayar: normalizedTotal,
         status_pembayaran: "Lunas",
       },
@@ -608,7 +619,7 @@ export async function updateOwnerTransaction(transactionId: string, totalTransak
 }
 
 export async function deleteOwnerTransaction(transactionId: string) {
-  const record: any = await prisma.transaksi.findUnique({
+  const record = await prisma.transaksi.findUnique({
     where: { id_transaksi: transactionId },
     include: {
       pembayaran: {
@@ -623,10 +634,14 @@ export async function deleteOwnerTransaction(transactionId: string) {
     throw new Error("Transaksi tidak ditemukan.");
   }
 
+  if (["Dibatalkan", "Gagal"].includes(record.pembayaran.status_pembayaran ?? "")) {
+    throw new Error("Transaksi yang dibatalkan atau gagal tidak dapat dihapus.");
+  }
+
   const paymentId = record.id_pembayaran ?? record.pembayaran.id_pembayaran;
   const orderId = record.pembayaran.id_pesanan ?? record.pembayaran.pesanan?.id_pesanan;
 
-  await prisma.$transaction(async (tx: any) => {
+  await prisma.$transaction(async (tx) => {
     await tx.pembayaran.update({
       where: { id_pembayaran: paymentId },
       data: {
@@ -664,10 +679,10 @@ export async function deleteOwnerOrderDetail(detailId: string) {
     include: { menu: true },
   });
 
-  const nextDetails = remainingDetails.filter((item: any) => item.id_detail !== detailId);
-  const nextTotal = nextDetails.reduce((sum: number, item: any) => sum + Number(item.subtotal ?? 0), 0);
+  const nextDetails = remainingDetails.filter((item) => item.id_detail !== detailId);
+  const nextTotal = nextDetails.reduce((sum, item) => sum + Number(item.subtotal ?? 0), 0);
 
-  await prisma.$transaction(async (tx: any) => {
+  await prisma.$transaction(async (tx) => {
     await tx.detail_pesanan.delete({
       where: { id_detail: detailId },
     });

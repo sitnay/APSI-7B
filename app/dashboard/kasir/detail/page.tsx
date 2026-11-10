@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import CashierOrderDetail from "@/components/CashierOrderDetail";
 import { getOrderDetail, getSessionUser } from "@/lib/coffee-oz";
+import { createCsrfToken } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 
@@ -24,20 +25,40 @@ export default async function KasirOrderDetailPage({
   const orderId = params.orderId ?? "";
 
   if (!orderId) {
-    redirect("/dashboard/kasir");
+    redirect("/dashboard/kasir/pembayaran");
   }
 
   const order = await getOrderDetail(orderId);
 
   if (!order) {
     return (
-      <main className="rounded-[26px] border border-white/20 bg-white/12 p-6 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] backdrop-blur-sm">
-        <div className="rounded-2xl border border-dashed border-white/40 bg-white/8 p-6 text-center text-white/80">
-          Pesanan yang dipilih tidak ditemukan.
-        </div>
+      <main className="cashier-detail-page">
+        <p className="cashier-empty-state">Pesanan yang dipilih tidak ditemukan.</p>
       </main>
     );
   }
 
-  return <CashierOrderDetail order={order} />;
+  const serializableOrder = {
+    id_pesanan: order.id_pesanan,
+    status_pesanan: order.status_pesanan,
+    tanggal: order.tanggal,
+    total_tagihan: Number(order.total_tagihan ?? 0),
+    detail_pesanan: order.detail_pesanan.map((detail) => ({
+      id_detail: detail.id_detail,
+      kuantitas_produk: Number(detail.kuantitas_produk ?? 0),
+      subtotal: Number(detail.subtotal ?? 0),
+      menu: detail.menu
+        ? {
+            nama_menu: detail.menu.nama_menu,
+            harga: Number(detail.menu.harga ?? 0),
+          }
+        : null,
+    })),
+    pembayaran: order.pembayaran.map((payment) => ({
+      status_pembayaran: payment.status_pembayaran,
+      metode: payment.metode,
+    })),
+  };
+
+  return <CashierOrderDetail csrfToken={createCsrfToken()} order={serializableOrder} />;
 }

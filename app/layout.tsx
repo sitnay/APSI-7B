@@ -1,14 +1,29 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
+import { Climate_Crisis, DM_Sans, Libre_Caslon_Display } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const climateCrisis = Climate_Crisis({
+  variable: "--font-climate-crisis",
+  subsets: ["latin"],
+  axes: ["YEAR"],
+});
+
+const codaCaption = localFont({
+  src: "./fonts/CodaCaption-ExtraBold.ttf",
+  variable: "--font-coda-caption",
+  weight: "800",
+  style: "normal",
+});
+
+const libreCaslonDisplay = Libre_Caslon_Display({
+  variable: "--font-libre-caslon-display",
+  weight: "400",
   subsets: ["latin"],
 });
 
@@ -21,9 +36,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html
       lang="id"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${dmSans.variable} ${climateCrisis.variable} ${codaCaption.variable} ${libreCaslonDisplay.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-[#dfe3ff] text-slate-800">{children}</body>
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }
